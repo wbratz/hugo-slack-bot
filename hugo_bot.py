@@ -32,6 +32,7 @@ from slack_sdk.errors import SlackApiError
 from hugo_common import load_env, notify_admin, resolve_channel_id, setup_logging
 from hugo_features import FEATURES, Feature
 from hugo_queue import add_to_queue
+from hugo_research import answer_question
 from hugo_summarize import fetch_article, summarize_article, summarize_thread
 
 load_env()
@@ -66,6 +67,9 @@ HELP_TEXT = (
     "no @-mention needed.\n\n"
     ":scroll: *Thread TL;DR* — inside any long thread, `@Hugo tldr` (or `recap` / "
     "`catchup`) and I'll summarize who said what + decisions + open questions.\n\n"
+    ":mag: *Just ask me a question* — `@Hugo <anything>` with no URL and I'll research "
+    "it on the web and reply in thread with a sourced answer. Ask from inside a thread "
+    "and I'll read the thread for context first (so \"why is this happening?\" works).\n\n"
     "_While I'm working you'll see me react :eyes: on your request. When I'm done, "
     "you'll see :white_check_mark:._\n\n"
     ":speech_balloon: *Prefer to DM me?* All of the above works in a direct message to "
@@ -89,6 +93,14 @@ QUEUE_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Bare greetings / acknowledgements that shouldn't trigger a web search.
+GREETING_RE = re.compile(
+    r"^(?:hi|hey+|hello|hiya|heya|yo|sup|howdy|gm|good\s+(?:morning|afternoon|evening)|"
+    r"thanks?|thank\s+you|thx|ty|cheers|ok(?:ay)?|cool|nice|great|lol|lmao|:wave:|:eyes:)"
+    r"[\s!.,?]*$",
+    re.IGNORECASE,
+)
+
 MAX_THREAD_MESSAGES = 500
 
 INTRO_DM = (
@@ -107,7 +119,9 @@ INTRO_DM = (
     ":link: *Summarize on demand* — `@Hugo https://...` and I'll reply in thread "
     "with a TL;DR right now.\n"
     ":books: *React :books: on a link* and I'll summarize it in thread immediately.\n"
-    ":scroll: *Thread TL;DR* — `@Hugo tldr` inside any thread.\n\n"
+    ":scroll: *Thread TL;DR* — `@Hugo tldr` inside any thread.\n"
+    ":mag: *Ask me anything* — `@Hugo <a question>` (no URL) and I'll research it on the "
+    "web and reply with a sourced answer, using the thread for context if you're in one.\n\n"
     "_I'm constantly being enhanced — more tricks land regularly. Mentions, smarter replies, "
     "richer summaries, and probably some chaos nobody asked for. Stay tuned._"
 )
@@ -173,6 +187,8 @@ def greet_user(client, user_id: str) -> None:
 _SLACK_LINK_RE = re.compile(r"<(https?://[^|>]+)(?:\|[^>]*)?>")
 # Plain URLs that weren't wrapped
 _PLAIN_URL_RE = re.compile(r"(?<![<\w])https?://[^\s<>\"\)\]]+")
+# Slack @-mention tokens: <@U123>, <@W123>, or <@U123|name>
+_MENTION_TOKEN_RE = re.compile(r"<@[UW]\w+(?:\|[^>]+)?>")
 
 
 def extract_urls(text: str) -> list[str]:
@@ -188,6 +204,26 @@ def extract_urls(text: str) -> list[str]:
             seen.add(u)
             ordered.append(u)
     return ordered
+
+
+def strip_mention(text: str) -> str:
+    """Remove Slack @-mention tokens (Hugo's own or anyone's) from the text."""
+    return _MENTION_TOKEN_RE.sub(" ", text or "").strip()
+
+
+def is_researchable(text: str) -> bool:
+    """True if `text` is a real question worth researching, not just noise.
+
+    Filters out empty pings and bare greetings/acknowledgements ("hi", "thanks")
+    so those still get the friendly nudge instead of a web search.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if GREETING_RE.match(stripped):
+        return False
+    # Needs some letters/digits — punctuation- or emoji-only isn't a question.
+    return bool(re.search(r"[A-Za-z0-9]", stripped))
 
 
 def queue_urls(urls: list[str], source: str) -> tuple[int, int]:
@@ -452,6 +488,82 @@ def summarize_and_reply(client, channel: str, thread_ts: str, urls: list[str]) -
         )
 
 
+def _format_sources(sources: list[tuple[str, str]]) -> str:
+    """Render (title, url) tuples as a row of Slack links."""
+    parts: list[str] = []
+    for title, url in sources:
+        clean = re.sub(r"[<>|\n]", " ", title).strip() or url
+        if len(clean) > 60:
+            clean = clean[:57].rstrip() + "..."
+        parts.append(f"<{url}|{clean}>")
+    return "  •  ".join(parts)
+
+
+def research_and_reply(
+    client,
+    *,
+    channel: str,
+    thread_ts: str,
+    in_thread_ts: str | None,
+    request_ts: str,
+    question: str,
+) -> None:
+    """Research a freeform question on the web and reply in thread with sources.
+
+    When the question was asked inside a thread, the thread messages are pulled
+    in as context (reusing the TL;DR machinery) so pronouns like "this" resolve.
+    """
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        log.error("ANTHROPIC_API_KEY not set — can't research")
+        client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=":warning: I'm not set up to research right now (missing API key).",
+        )
+        return
+
+    thread_context: str | None = None
+    if in_thread_ts:
+        messages = fetch_thread_messages(client, channel, in_thread_ts)
+        if messages:
+            bot_user_id = get_bot_user_id(client)
+            thread_text, real_count = format_thread_for_summary(
+                client, messages, bot_user_id, exclude_ts=request_ts
+            )
+            if thread_text.strip():
+                thread_context = thread_text
+                log.info(f"  research with thread context ({real_count} messages)")
+
+    anthropic_client = Anthropic(api_key=anthropic_api_key)
+    try:
+        answer, sources = answer_question(
+            anthropic_client, question, thread_context=thread_context
+        )
+    except Exception as exc:
+        log.warning(f"  research failed: {exc}")
+        client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=":confused: Couldn't dig that up — the research call fell over. Try rephrasing?",
+        )
+        return
+
+    if not answer:
+        client.chat_postMessage(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=":confused: I came up empty on that one. Try rephrasing?",
+        )
+        return
+
+    text = answer
+    if sources:
+        text = f"{answer}\n\n_Sources:_ {_format_sources(sources)}"
+    client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=text)
+    log.info(f"  research answer posted ({len(sources)} sources)")
+
+
 def load_announced_features() -> set[str]:
     if ANNOUNCED_FEATURES_FILE.exists():
         try:
@@ -624,13 +736,33 @@ def handle_user_request(
         )
         return
 
-    # Default — friendly nudge
+    # Freeform question — strip Hugo's mention token and, if there's a real
+    # question left, research it. Bare greetings/noise fall through to the nudge.
+    query = strip_mention(text)
+    if is_researchable(query):
+        react_status(client, channel, request_ts, WORKING_EMOJI)
+        try:
+            research_and_reply(
+                client,
+                channel=channel,
+                thread_ts=thread_ts_for_reply,
+                in_thread_ts=in_thread_ts,
+                request_ts=request_ts,
+                question=query,
+            )
+        finally:
+            unreact_status(client, channel, request_ts, WORKING_EMOJI)
+            react_status(client, channel, request_ts, DONE_EMOJI)
+        return
+
+    # Default — friendly nudge for greetings / empty pings
     client.chat_postMessage(
         channel=channel,
         thread_ts=thread_ts_for_reply,
         text=(
-            ":wave: Hi! Say `help` to see what I can do, drop a URL to summarize, "
-            "or say `queue <url>` to save it for tomorrow's digest."
+            ":wave: Hi! Ask me a question and I'll research it, drop a URL to summarize, "
+            "say `queue <url>` to save it for tomorrow's digest, or say `help` for the "
+            "full list."
         ),
     )
 

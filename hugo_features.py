@@ -107,4 +107,14 @@ FEATURES: list[Feature] = [
             "private."
         ),
     ),
+    Feature(
+        id="web_research",
+        title="Ask me anything (web research)",
+        description=(
+            "@-mention me with a question — no URL needed — and I'll research it "
+            "live on the web and reply in thread with a concise, sourced answer. "
+            "Ask from inside a thread and I'll read the thread for context first, "
+            "so \"why is this happening?\" actually resolves."
+        ),
+    ),
 ]
