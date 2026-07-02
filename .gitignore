@@ -11,3 +11,5 @@ reading_list.json
 # Local deployment values (real NAS host/user/port/paths) — keep off public remotes
 DEPLOYMENT.local.md
 *.local.md
+deploy.local.ps1
+*.local.ps1

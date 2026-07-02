@@ -71,17 +71,14 @@ All commands assume you're SSH'd into the NAS at `/volume1/docker/hugo/`. Substi
 1. Implement it locally. Commit.
 2. Append a `Feature(id=..., title=..., description=...)` entry to the bottom of `FEATURES` in `hugo_features.py`. ID is a snake_case slug, unique.
 3. If user-facing, update `HELP_TEXT` and (if appropriate) `INTRO_DM` in `hugo_bot.py`.
-4. Push changed files to NAS:
+4. Deploy — one command from the repo root:
    ```powershell
-   scp -O -P <ssh-port> <changed files> <nas-user>@<nas-host>:/volume1/docker/hugo/
+   .\deploy.ps1
    ```
-5. SSH in and rebuild + restart:
-   ```bash
-   cd /volume1/docker/hugo
-   sudo docker compose build
-   sudo docker compose up -d bot
-   ```
-6. Hugo auto-announces in `HUGO_ANNOUNCE_CHANNEL`.
+   This pushes source, rebuilds the shared image, restarts every instance's bot, and tails the log. (In Claude Code, the `/deploy-hugo` skill runs this and verifies the result.) It reads NAS connection details from `deploy.local.ps1` (gitignored — copy from `deploy.local.ps1.example`).
+5. Hugo auto-announces the new feature in `HUGO_ANNOUNCE_CHANNEL` on restart.
+
+The manual equivalent, if you ever need it: `scp -O -P <ssh-port> <files> <nas-user>@<nas-host>:/volume1/docker/hugo/`, then SSH in and `sudo docker compose build && sudo docker compose up -d bot` in each instance folder.
 
 ### Editing the curator's feed list
 

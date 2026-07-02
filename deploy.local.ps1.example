@@ -1,0 +1,17 @@
+# deploy.local.ps1.example — copy to deploy.local.ps1 and fill in your NAS values.
+#
+#   cp deploy.local.ps1.example deploy.local.ps1
+#
+# deploy.local.ps1 is gitignored so your host / user / paths never get committed.
+
+$NasUser     = "your-nas-user"
+$NasHost     = "your-nas-host-or-ip"
+$NasPort     = "22"
+$DockerPath  = "/usr/local/bin/docker"   # `which docker` on the NAS
+$PrimaryPath = "/volume1/docker/hugo"
+
+# Every instance to restart after the image rebuilds (primary first).
+# Additional instances share the image built in $PrimaryPath.
+$Instances   = @(
+    "/volume1/docker/hugo"
+)
