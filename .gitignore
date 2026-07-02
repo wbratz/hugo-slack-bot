@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Reading list exports — contain personal browsing data
+reading_list.json
+
+# Local deployment values (real NAS host/user/port/paths) — keep off public remotes
+DEPLOYMENT.local.md
+*.local.md

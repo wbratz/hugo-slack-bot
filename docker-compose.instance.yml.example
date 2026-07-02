@@ -1,0 +1,49 @@
+# Template for running a second Hugo instance for a different Slack workspace.
+#
+# Usage:
+#   1. Create a new folder on the NAS: /volume1/docker/hugo-<workspace>/
+#   2. Copy this file there and rename to docker-compose.yml
+#   3. Create a .env file in that folder with the second workspace's tokens
+#      (see CLAUDE.md > .env section — same vars, plus HUGO_WORKSPACE_NAME)
+#   4. Edit the `name:` field below to a unique project name (e.g. `hugo-acme`)
+#   5. Run: `cd /volume1/docker/hugo-<workspace> && sudo docker compose up -d bot`
+#
+# This instance shares the same hugo:latest image as the primary instance
+# (no `build:` directive). Rebuild via the primary instance's compose file
+# and both instances pick it up on next restart.
+
+name: hugo-CHANGEME            # <— change to a unique name per instance
+
+services:
+  bot:
+    image: hugo:latest          # built by the primary /volume1/docker/hugo
+    container_name: hugo-CHANGEME-bot
+    restart: unless-stopped
+    command: ["python", "hugo_bot.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  digest:
+    image: hugo:latest
+    container_name: hugo-CHANGEME-digest
+    profiles: [digest]
+    command: ["python", "daily_digest.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  curator:
+    image: hugo:latest
+    container_name: hugo-CHANGEME-curator
+    profiles: [curator]
+    command: ["python", "hugo_curator.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1

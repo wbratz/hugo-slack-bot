@@ -1,0 +1,34 @@
+services:
+  bot:
+    image: hugo:latest
+    build: .
+    container_name: hugo-bot
+    restart: unless-stopped
+    command: ["python", "hugo_bot.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  digest:
+    image: hugo:latest
+    container_name: hugo-digest
+    profiles: [digest]
+    command: ["python", "daily_digest.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  curator:
+    image: hugo:latest
+    container_name: hugo-curator
+    profiles: [curator]
+    command: ["python", "hugo_curator.py"]
+    volumes:
+      - ./state:/root/.hugo
+      - ./.env:/app/.env:ro
+    environment:
+      - PYTHONUNBUFFERED=1

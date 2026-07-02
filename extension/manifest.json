@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Reading List Exporter",
+  "version": "1.0.0",
+  "description": "Periodically exports the Chrome reading list to Downloads/reading_list.json for the daily digest script.",
+  "permissions": ["readingList", "downloads", "alarms"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
