@@ -55,8 +55,14 @@ def add_to_queue(
     url: str,
     title: Optional[str] = None,
     source: str = "manual",
+    score: Optional[int] = None,
 ) -> bool:
-    """Add a URL to the pending queue. Returns True if newly added, False if already known."""
+    """Add a URL to the pending queue. Returns True if newly added, False if already known.
+
+    `score` is the curator's 1-10 relevance score; the digest uses it to pick
+    the best N when the pool is larger than the daily cap. Manual saves have no
+    score (None) and are always posted, never culled.
+    """
     queue = load_queue()
     if is_known(url, queue):
         return False
@@ -65,6 +71,7 @@ def add_to_queue(
             "url": url,
             "title": title or url,
             "source": source,
+            "score": score,
             "added_at": _now_iso(),
         }
     )
@@ -99,4 +106,19 @@ def mark_posted(urls: list[str]) -> None:
 
     queue["pending"] = new_pending
     queue["posted"] = posted
+    save_queue(queue)
+
+
+def discard_pending(urls: list[str]) -> None:
+    """Remove URLs from pending WITHOUT recording them as posted.
+
+    Used by the digest to drop curator candidates that didn't make the best-N
+    cut. They won't reappear: the curator's own `curator_state.json` already
+    remembers every URL it evaluated, so it won't re-add them.
+    """
+    if not urls:
+        return
+    queue = load_queue()
+    drop = set(urls)
+    queue["pending"] = [e for e in queue.get("pending", []) if e["url"] not in drop]
     save_queue(queue)

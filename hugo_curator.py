@@ -30,7 +30,7 @@ load_env()
 log = setup_logging("hugo.curator")
 
 CURATOR_STATE_FILE = STATE_DIR / "curator_state.json"
-DAILY_CAP = int(os.environ.get("HUGO_CURATOR_DAILY_CAP", "7"))
+DAILY_CAP = int(os.environ.get("HUGO_CURATOR_DAILY_CAP", "3"))
 RANKING_THRESHOLD = int(os.environ.get("HUGO_CURATOR_THRESHOLD", "6"))
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 ENTRIES_PER_FEED = 25
@@ -278,7 +278,7 @@ def _run() -> int:
 
     added = 0
     for score, c, reason in selected:
-        if add_to_queue(c.url, title=c.title, source=f"curator/{c.source}"):
+        if add_to_queue(c.url, title=c.title, source=f"curator/{c.source}", score=score):
             log.info(f"  +{score} [{c.source}] {c.title[:80]} — {reason[:80]}")
             added += 1
 

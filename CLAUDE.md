@@ -7,7 +7,7 @@ Personal Slack bot for a Slack workspace. Started as a daily reading digest; gre
 ## What Hugo does today
 
 - **Auto-curator** — at ~6am daily, scans AI/tech RSS feeds (`hugo_curator.py`'s `FEEDS` list), asks Claude to score each candidate for relevance, adds the top picks to the digest queue.
-- **Daily reading digest** — at 8am, summarizes everything in the queue (auto-curated + manually saved) and posts to `HUGO_DIGEST_CHANNEL`. Marks them as posted so they don't recycle.
+- **Reading digest** — on weekday mornings at 8am, posts the best `HUGO_DIGEST_MAX_POSTS` (default 3) curator picks by score, plus any manual saves, to `HUGO_DIGEST_CHANNEL`. Skips Sat/Sun (the curator keeps running, so Monday picks the best of the weekend pool). Non-selected curator picks are discarded so the pool stays fresh.
 - **Manual save** — `:bookmark:` reaction on any message with a URL, or `@Hugo queue <url>`, adds it to the digest queue.
 - **Workspace greeter** — DMs new members with the intro; posts a public hello in `HUGO_WELCOME_CHANNEL`. Toggle with `HUGO_WELCOME_ENABLED`.
 - **On-demand URL summary** — `@Hugo <url>` or `:books:` reaction → summary in thread (right now, not next morning).
@@ -152,8 +152,10 @@ Optional (defaults shown):
 - `HUGO_WELCOME_CHANNEL` — where the public part of the greeting posts (the DM still goes if welcome is enabled, even without this set; public greeting requires both)
 - `HUGO_ANNOUNCE_CHANNEL=#general` — where feature announcements post
 - `CLAUDE_MODEL=claude-sonnet-4-6` — model used for summaries + curator ranking
-- `HUGO_CURATOR_DAILY_CAP=7` — max articles the curator adds per run
+- `HUGO_CURATOR_DAILY_CAP=3` — max curator picks added to the queue per run
 - `HUGO_CURATOR_THRESHOLD=6` — minimum Claude relevance score (1-10) to qualify
+- `HUGO_DIGEST_MAX_POSTS=3` — max curator picks the digest posts per run (best-by-score). Manual `:bookmark:` saves always post on top of this and are never culled.
+- `HUGO_TZ=UTC` — timezone for the weekend check and digest date header. **Set this to your local zone** (e.g. `America/Phoenix`) so the Sat/Sun skip lands on your weekend, not UTC's.
 
 See `.env.example` for a starting template. When editing `.env` on the NAS, **always end the file with a newline** — `echo "X=Y" >> .env` will concatenate onto the previous line if the file lacked a trailing newline. Verify with `cat .env` after any append.
 
@@ -184,6 +186,8 @@ Event subscriptions:
 |-----------|------|----------|------|
 | `Hugo Curator` | `cd /volume1/docker/hugo && <docker-path> compose run --rm curator >> state/curator_cron.log 2>&1` | Daily 06:00 | root |
 | `Hugo Daily Digest` | `cd /volume1/docker/hugo && <docker-path> compose run --rm digest >> state/digest_cron.log 2>&1` | Daily 08:00 | root |
+
+Both cron entries stay **daily** — the curator runs every day (so weekend finds accumulate), and the digest self-skips Sat/Sun in code based on `HUGO_TZ`. No need to configure a weekday-only schedule in DSM. Run `digest --force` to post on a weekend manually: `docker compose run --rm digest python daily_digest.py --force`.
 
 `<docker-path>` is the absolute path to the docker binary on the NAS (find with `which docker`; recorded in `DEPLOYMENT.local.md`).
 
